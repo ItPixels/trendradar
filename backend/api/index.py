@@ -40,6 +40,22 @@ async def debug_env():
     }
 
 
+@app.post("/debug/sql")
+async def debug_sql(q: str = Query(...)):
+    """Run a SQL query (admin use only - remove in production)."""
+    try:
+        import asyncpg
+        db_url = os.environ.get("DATABASE_URL", "")
+        raw_url = db_url.replace("postgresql+asyncpg://", "postgresql://")
+        conn = await asyncpg.connect(raw_url, statement_cache_size=0)
+        await conn.execute("DEALLOCATE ALL")
+        result = await conn.execute(q)
+        await conn.close()
+        return {"status": "ok", "result": result}
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
+
+
 @app.get("/debug/db")
 async def debug_db():
     try:
