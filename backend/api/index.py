@@ -47,7 +47,8 @@ async def debug_db():
         db_url = os.environ.get("DATABASE_URL", "")
         # Convert SQLAlchemy URL to asyncpg format
         raw_url = db_url.replace("postgresql+asyncpg://", "postgresql://")
-        conn = await asyncpg.connect(raw_url)
+        conn = await asyncpg.connect(raw_url, statement_cache_size=0)
+        await conn.execute("DEALLOCATE ALL")
         result = await conn.fetchval("SELECT COUNT(*) FROM categories")
         await conn.close()
         return {"status": "connected", "categories_count": result}

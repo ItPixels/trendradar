@@ -3,6 +3,7 @@ import uuid
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.pool import NullPool
+from sqlalchemy import event
 
 
 def _get_db_url() -> str:
@@ -18,14 +19,12 @@ def _create_engine():
     """Create engine compatible with Supabase pgbouncer transaction-mode pooler.
 
     Key settings for pgbouncer compatibility:
-    - NullPool: no connection pooling on our side (pgbouncer handles it)
-    - statement_cache_size=0: disable asyncpg's internal prepared statement cache
+    - NullPool: no connection pooling on our side
+    - statement_cache_size=0: disable asyncpg's prepared statement cache
     - prepared_statement_cache_size=0: disable SQLAlchemy's prepared statement cache
-    - prepared_statement_name_func: unique names per invocation to avoid
-      "prepared statement already exists" collisions across pgbouncer connections
+    - DEALLOCATE ALL on connect: clear stale prepared statements from recycled
+      pgbouncer backend connections (Vercel warm starts)
     """
-    # Generate a unique prefix for this engine instance to avoid
-    # prepared statement name collisions across Vercel warm starts
     prefix = uuid.uuid4().hex[:8]
 
     engine = create_async_engine(
@@ -38,6 +37,16 @@ def _create_engine():
             "prepared_statement_name_func": lambda: f"_ps_{prefix}_{uuid.uuid4().hex[:8]}",
         },
     )
+
+    @event.listens_for(engine.sync_engine, "connect")
+    def on_connect(dbapi_connection, connection_record):
+        """Clear stale prepared statements from recycled pgbouncer connections."""
+        cursor = dbapi_connection.cursor()
+        try:
+            cursor.execute("DEALLOCATE ALL")
+        except Exception:
+            pass  # Ignore if DEALLOCATE fails
+
     return engine
 
 
