@@ -5,12 +5,19 @@ from sqlalchemy.pool import NullPool
 
 
 def _get_db_url() -> str:
-    """Get database URL from env or settings."""
+    """Get database URL from env or settings.
+
+    Auto-switches from Supabase transaction-mode pooler (port 6543) to
+    direct connection (port 5432) because asyncpg's prepared statements
+    are incompatible with pgbouncer transaction mode.
+    """
     url = os.environ.get("DATABASE_URL")
-    if url:
-        return url
-    from app.config import settings
-    return settings.database_url
+    if not url:
+        from app.config import settings
+        url = settings.database_url
+    # Supabase pooler port 6543 → direct port 5432
+    url = url.replace(":6543/", ":5432/")
+    return url
 
 
 def _create_engine():
