@@ -1,6 +1,7 @@
 import os
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy.pool import NullPool
 
 _engine = None
 _async_session = None
@@ -21,10 +22,8 @@ def get_engine():
         db_url = _get_db_url()
         _engine = create_async_engine(
             db_url,
-            echo=os.environ.get("APP_ENV", "development") == "development",
-            pool_size=5,
-            max_overflow=10,
-            pool_pre_ping=True,
+            echo=False,
+            poolclass=NullPool,
             connect_args={
                 "statement_cache_size": 0,
                 "prepared_statement_cache_size": 0,
