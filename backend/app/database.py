@@ -1,41 +1,42 @@
 import os
+import asyncpg
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.pool import NullPool
 
 
 def _get_db_url() -> str:
-    """Get database URL from env or settings.
-
-    Auto-switches from Supabase transaction-mode pooler (port 6543) to
-    direct connection (port 5432) because asyncpg's prepared statements
-    are incompatible with pgbouncer transaction mode.
-    """
+    """Get database URL from env or settings."""
     url = os.environ.get("DATABASE_URL")
     if not url:
         from app.config import settings
         url = settings.database_url
-    # Supabase pooler port 6543 → direct port 5432
-    url = url.replace(":6543/", ":5432/")
     return url
 
 
-def _create_engine():
-    """Create a fresh engine every time — required for serverless + pgbouncer transaction mode.
+def _get_raw_url() -> str:
+    """Convert SQLAlchemy URL to raw postgresql:// for asyncpg."""
+    return _get_db_url().replace("postgresql+asyncpg://", "postgresql://")
 
-    With NullPool there is no connection pool, so engine creation is cheap.
-    A fresh engine avoids stale dialect state on Vercel warm starts that causes
-    DuplicatePreparedStatementError with Supabase transaction-mode pooler.
+
+def _create_engine():
+    """Create engine with asyncpg connection creator that disables prepared statement cache.
+
+    The key fix: use async_creator to create asyncpg connections with
+    statement_cache_size=0, which is required for Supabase's pgbouncer
+    transaction-mode pooler (port 6543). SQLAlchemy's connect_args
+    don't reliably pass this setting through to asyncpg.
     """
-    db_url = _get_db_url()
+    raw_url = _get_raw_url()
+
+    async def creator():
+        return await asyncpg.connect(raw_url, statement_cache_size=0)
+
     engine = create_async_engine(
-        db_url,
+        _get_db_url(),
         echo=False,
         poolclass=NullPool,
-        connect_args={
-            "statement_cache_size": 0,
-            "prepared_statement_cache_size": 0,
-        },
+        async_creator=creator,
     )
     return engine
 
