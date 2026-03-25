@@ -1,5 +1,19 @@
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
+/** Convert snake_case keys to camelCase recursively */
+function toCamelCase(obj: unknown): unknown {
+  if (Array.isArray(obj)) return obj.map(toCamelCase);
+  if (obj !== null && typeof obj === "object" && !(obj instanceof Date)) {
+    return Object.fromEntries(
+      Object.entries(obj as Record<string, unknown>).map(([key, val]) => [
+        key.replace(/_([a-z])/g, (_, c) => c.toUpperCase()),
+        toCamelCase(val),
+      ])
+    );
+  }
+  return obj;
+}
+
 class ApiClient {
   private baseUrl: string;
 
@@ -25,7 +39,8 @@ class ApiClient {
       throw new Error(`API error: ${res.status} ${res.statusText}`);
     }
 
-    return res.json();
+    const data = await res.json();
+    return toCamelCase(data) as T;
   }
 
   async post<T>(path: string, data?: unknown): Promise<T> {
@@ -39,7 +54,8 @@ class ApiClient {
       throw new Error(`API error: ${res.status} ${res.statusText}`);
     }
 
-    return res.json();
+    const json = await res.json();
+    return toCamelCase(json) as T;
   }
 
   async put<T>(path: string, data?: unknown): Promise<T> {
@@ -53,7 +69,8 @@ class ApiClient {
       throw new Error(`API error: ${res.status} ${res.statusText}`);
     }
 
-    return res.json();
+    const json = await res.json();
+    return toCamelCase(json) as T;
   }
 
   async delete<T>(path: string): Promise<T> {
@@ -66,7 +83,8 @@ class ApiClient {
       throw new Error(`API error: ${res.status} ${res.statusText}`);
     }
 
-    return res.json();
+    const json = await res.json();
+    return toCamelCase(json) as T;
   }
 }
 
