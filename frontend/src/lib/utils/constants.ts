@@ -1,0 +1,62 @@
+export const SOURCE_DISPLAY_NAMES: Record<string, string> = {
+  google_trends: "Google Trends",
+  reddit: "Reddit",
+  hackernews: "Hacker News",
+  youtube_trending: "YouTube",
+  github_trending: "GitHub",
+  wikipedia: "Wikipedia",
+  google_news: "Google News",
+  producthunt: "Product Hunt",
+  npm_registry: "npm",
+  pypi_stats: "PyPI",
+  arxiv: "ArXiv",
+  coingecko: "CoinGecko",
+  steam_charts: "Steam",
+  devto: "Dev.to",
+  lobsters: "Lobsters",
+  stackoverflow: "Stack Overflow",
+};
+
+export const SOURCE_COLORS: Record<string, string> = {
+  google_trends: "#4285F4",
+  reddit: "#FF5700",
+  hackernews: "#FF6600",
+  youtube_trending: "#FF0000",
+  github_trending: "#333333",
+  wikipedia: "#000000",
+  google_news: "#4285F4",
+  producthunt: "#DA552F",
+  npm_registry: "#CB3837",
+  pypi_stats: "#3776AB",
+  arxiv: "#B31B1B",
+  coingecko: "#8DC647",
+  steam_charts: "#1B2838",
+  devto: "#0A0A0A",
+  lobsters: "#AC130D",
+  stackoverflow: "#F48024",
+};
+
+export const CATEGORY_COLORS: Record<string, string> = {
+  tech: "#6366f1",
+  ai: "#8b5cf6",
+  crypto: "#f59e0b",
+  business: "#10b981",
+  science: "#06b6d4",
+  health: "#ef4444",
+  culture: "#ec4899",
+  politics: "#64748b",
+  gaming: "#84cc16",
+  finance: "#0ea5e9",
+  sports: "#f97316",
+  design: "#d946ef",
+  devtools: "#22d3ee",
+  opensource: "#a3e635",
+};
+
+export const PLAN_LIMITS = {
+  free: { trendsPerDay: 3, briefsPerDay: 0, alerts: 0, predictions: false },
+  creator: { trendsPerDay: -1, briefsPerDay: 5, alerts: 3, predictions: "24h" },
+  pro: { trendsPerDay: -1, briefsPerDay: -1, alerts: -1, predictions: "72h" },
+  business: { trendsPerDay: -1, briefsPerDay: -1, alerts: -1, predictions: "72h" },
+  enterprise: { trendsPerDay: -1, briefsPerDay: -1, alerts: -1, predictions: "72h" },
+};
