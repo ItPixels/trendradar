@@ -56,6 +56,36 @@ async def debug_db():
         return {"status": "error", "error": str(e), "trace": traceback.format_exc()}
 
 
+@app.post("/debug/collect-test")
+async def debug_collect_test():
+    """Test the collect pipeline DB operations without HTTP collection."""
+    try:
+        from sqlalchemy.ext.asyncio import AsyncSession
+        from sqlalchemy import select, text
+        from app.database import _create_engine, async_sessionmaker
+
+        engine = _create_engine()
+        session_maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+        async with session_maker() as session:
+            # Test 1: raw text query
+            r1 = await session.execute(text("SELECT 1"))
+            val = r1.scalar()
+
+            # Test 2: ORM query (like collect does)
+            from app.models.category import Category
+            r2 = await session.execute(select(Category).where(Category.is_active == True))
+            cats = r2.scalars().all()
+
+            await engine.dispose()
+            return {
+                "status": "ok",
+                "select_1": val,
+                "categories": len(cats),
+            }
+    except Exception as e:
+        return {"status": "error", "error": str(e), "trace": traceback.format_exc()}
+
+
 # Try to import full app routes
 try:
     from app.config import settings
