@@ -3,12 +3,13 @@
 Replaces Celery tasks for Vercel serverless deployment.
 """
 import logging
+import traceback
 from datetime import datetime, timezone
 from typing import Optional
-from fastapi import APIRouter, Depends, Query
-from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi import APIRouter, Query
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy import select
-from app.database import get_db
+from app.database import _create_engine
 from app.core.signals.manager import SignalManager
 from app.core.signals.deduplicator import SignalDeduplicator
 from app.core.signals.normalizer import TopicNormalizer
@@ -72,7 +73,6 @@ async def collect_signals(
         default=None,
         description="Specific sources to collect from. If empty, collects from fast sources."
     ),
-    db: AsyncSession = Depends(get_db),
 ):
     """Trigger signal collection, process, and save to DB.
 
@@ -80,15 +80,14 @@ async def collect_signals(
     wikipedia, youtube_trending, producthunt, npm_registry, pypi_stats,
     arxiv, coingecko, steam_charts, devto, lobsters, stackoverflow
     """
-    import traceback
     try:
-        return await _do_collect(sources, db)
+        return await _do_collect(sources)
     except Exception as e:
         logger.error(f"Collection error: {e}\n{traceback.format_exc()}")
         return {"error": str(e), "trace": traceback.format_exc()}
 
 
-async def _do_collect(sources: Optional[list[str]], db: AsyncSession):
+async def _do_collect(sources: Optional[list[str]]):
     # Default to fast, reliable sources if none specified
     if not sources:
         sources = [
@@ -96,7 +95,7 @@ async def _do_collect(sources: Optional[list[str]], db: AsyncSession):
             "google_news", "coingecko", "npm_registry",
         ]
 
-    # 1. Collect signals
+    # 1. Collect signals (HTTP requests — no DB needed yet)
     manager = SignalManager()
     raw_results = await manager.collect_all(sources=sources)
 
@@ -104,126 +103,129 @@ async def _do_collect(sources: Optional[list[str]], db: AsyncSession):
     dedup = SignalDeduplicator()
     topic_groups = dedup.deduplicate(raw_results)
 
-    # 3. Load category map
-    cat_result = await db.execute(select(Category).where(Category.is_active == True))
-    categories = {c.slug: c.id for c in cat_result.scalars().all()}
+    # 3. Open DB session and do all DB work
+    engine = _create_engine()
+    session_maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
-    # 4. Create/update trends and signal events
-    normalizer = TopicNormalizer()
     trends_created = 0
     trends_updated = 0
     signals_saved = 0
-    now = datetime.now(timezone.utc)
 
-    for topic, signals in topic_groups.items():
-        if not signals:
-            continue
+    try:
+        async with session_maker() as db:
+            # Load category map
+            cat_result = await db.execute(select(Category).where(Category.is_active == True))
+            categories = {c.slug: c.id for c in cat_result.scalars().all()}
 
-        # Skip very short or generic topics
-        if len(topic) < 3:
-            continue
+            normalizer = TopicNormalizer()
+            now = datetime.now(timezone.utc)
 
-        slug = normalizer.create_slug(topic)
-        if not slug or slug == "unknown":
-            continue
+            for topic, signals in topic_groups.items():
+                if not signals:
+                    continue
 
-        # Count unique sources for this topic
-        unique_sources = list(set(s.source for s in signals))
-        source_count = len(unique_sources)
+                # Skip very short or generic topics
+                if len(topic) < 3:
+                    continue
 
-        # Calculate basic scores
-        max_strength = max(s.signal_strength for s in signals)
-        avg_strength = sum(s.signal_strength for s in signals) / len(signals)
+                slug = normalizer.create_slug(topic)
+                if not slug or slug == "unknown":
+                    continue
 
-        # Trend score based on source diversity and signal strength
-        trend_score = min(100, (
-            source_count * 15 +  # 15 points per source
-            max_strength * 30 +  # up to 30 from signal strength
-            min(len(signals), 10) * 3  # up to 30 from signal count
-        ))
+                # Count unique sources for this topic
+                unique_sources = list(set(s.source for s in signals))
+                source_count = len(unique_sources)
 
-        velocity_24h = len(signals)  # signals in this batch as proxy
+                # Calculate basic scores
+                max_strength = max(s.signal_strength for s in signals)
 
-        # Guess category
-        cat_slug = _guess_category_slug(topic, signals)
-        category_id = categories.get(cat_slug)
+                # Trend score based on source diversity and signal strength
+                trend_score = min(100, (
+                    source_count * 15 +
+                    max_strength * 30 +
+                    min(len(signals), 10) * 3
+                ))
 
-        # Determine status
-        if source_count >= 3:
-            status = "active"
-        elif source_count >= 2 or trend_score > 50:
-            status = "emerging"
-        else:
-            status = "emerging"
+                velocity_24h = len(signals)
 
-        is_viral = source_count >= 4 and trend_score > 70
-        is_breaking = source_count >= 3 and max_strength > 0.8
+                # Guess category
+                cat_slug = _guess_category_slug(topic, signals)
+                category_id = categories.get(cat_slug)
 
-        # Check if trend already exists
-        existing = await db.execute(
-            select(Trend).where(Trend.topic_slug == slug, Trend.deleted_at.is_(None))
-        )
-        trend = existing.scalar_one_or_none()
+                # Determine status
+                if source_count >= 3:
+                    status = "active"
+                else:
+                    status = "emerging"
 
-        if trend:
-            # Update existing
-            trend.trend_score = max(trend.trend_score, trend_score)
-            trend.velocity_24h = velocity_24h
-            trend.source_count = max(trend.source_count or 0, source_count)
-            trend.active_sources = unique_sources
-            trend.signal_count_24h = (trend.signal_count_24h or 0) + len(signals)
-            if status == "active" and trend.status == "emerging":
-                trend.status = status
-            trend.is_viral = trend.is_viral or is_viral
-            trend.is_breaking = trend.is_breaking or is_breaking
-            trend.updated_at = now
-            trends_updated += 1
-        else:
-            # Use first signal's title as description if topic is short
-            description = None
-            for s in signals:
-                if len(s.title) > len(topic) + 5:
-                    description = s.title[:500]
-                    break
+                is_viral = source_count >= 4 and trend_score > 70
+                is_breaking = source_count >= 3 and max_strength > 0.8
 
-            trend = Trend(
-                topic=topic,
-                topic_slug=slug,
-                description=description,
-                category_id=category_id,
-                trend_score=trend_score,
-                velocity_24h=velocity_24h,
-                source_count=source_count,
-                active_sources=unique_sources,
-                signal_count_24h=len(signals),
-                status=status,
-                is_viral=is_viral,
-                is_breaking=is_breaking,
-                first_seen_at=now,
-                tags=[],
-            )
-            db.add(trend)
-            trends_created += 1
+                # Check if trend already exists
+                existing = await db.execute(
+                    select(Trend).where(Trend.topic_slug == slug, Trend.deleted_at.is_(None))
+                )
+                trend = existing.scalar_one_or_none()
 
-        await db.flush()
+                if trend:
+                    trend.trend_score = max(trend.trend_score, trend_score)
+                    trend.velocity_24h = velocity_24h
+                    trend.source_count = max(trend.source_count or 0, source_count)
+                    trend.active_sources = unique_sources
+                    trend.signal_count_24h = (trend.signal_count_24h or 0) + len(signals)
+                    if status == "active" and trend.status == "emerging":
+                        trend.status = status
+                    trend.is_viral = trend.is_viral or is_viral
+                    trend.is_breaking = trend.is_breaking or is_breaking
+                    trend.updated_at = now
+                    trends_updated += 1
+                else:
+                    description = None
+                    for s in signals:
+                        if len(s.title) > len(topic) + 5:
+                            description = s.title[:500]
+                            break
 
-        # Create signal events
-        for signal in signals[:20]:  # Limit signals per trend
-            event = SignalEvent(
-                trend_id=trend.id,
-                source=signal.source,
-                source_id=signal.source_id,
-                title=signal.title[:1000] if signal.title else None,
-                url=signal.url,
-                content=signal.content[:2000] if signal.content else None,
-                signal_strength=signal.signal_strength,
-                metrics=signal.metrics,
-                detected_at=signal.detected_at or now,
-            )
-            db.add(event)
-            signals_saved += 1
+                    trend = Trend(
+                        topic=topic,
+                        topic_slug=slug,
+                        description=description,
+                        category_id=category_id,
+                        trend_score=trend_score,
+                        velocity_24h=velocity_24h,
+                        source_count=source_count,
+                        active_sources=unique_sources,
+                        signal_count_24h=len(signals),
+                        status=status,
+                        is_viral=is_viral,
+                        is_breaking=is_breaking,
+                        first_seen_at=now,
+                        tags=[],
+                    )
+                    db.add(trend)
+                    trends_created += 1
 
-    # Commit happens in get_db context manager
+                await db.flush()
+
+                # Create signal events (limit per trend)
+                for signal in signals[:10]:
+                    event = SignalEvent(
+                        trend_id=trend.id,
+                        source=signal.source,
+                        source_id=signal.source_id,
+                        title=signal.title[:1000] if signal.title else None,
+                        url=signal.url,
+                        content=signal.content[:2000] if signal.content else None,
+                        signal_strength=signal.signal_strength,
+                        metrics=signal.metrics,
+                        detected_at=signal.detected_at or now,
+                    )
+                    db.add(event)
+                    signals_saved += 1
+
+            await db.commit()
+    finally:
+        await engine.dispose()
 
     total_raw = sum(len(v) for v in raw_results.values())
     return {
