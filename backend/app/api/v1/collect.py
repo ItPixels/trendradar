@@ -80,6 +80,15 @@ async def collect_signals(
     wikipedia, youtube_trending, producthunt, npm_registry, pypi_stats,
     arxiv, coingecko, steam_charts, devto, lobsters, stackoverflow
     """
+    import traceback
+    try:
+        return await _do_collect(sources, db)
+    except Exception as e:
+        logger.error(f"Collection error: {e}\n{traceback.format_exc()}")
+        return {"error": str(e), "trace": traceback.format_exc()}
+
+
+async def _do_collect(sources: Optional[list[str]], db: AsyncSession):
     # Default to fast, reliable sources if none specified
     if not sources:
         sources = [
