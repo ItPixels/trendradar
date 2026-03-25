@@ -7,12 +7,24 @@ from app.services.category_service import CategoryService
 router = APIRouter()
 
 
+def category_to_dict(cat) -> dict:
+    return {
+        "id": str(cat.id),
+        "name": cat.name,
+        "slug": cat.slug,
+        "description": cat.description,
+        "icon": getattr(cat, "icon", None),
+        "color": getattr(cat, "color", "#6366f1"),
+        "sort_order": cat.sort_order,
+    }
+
+
 @router.get("")
 async def list_categories(db: AsyncSession = Depends(get_db)):
     """Get all active categories."""
     service = CategoryService(db)
     categories = await service.get_all_categories()
-    return {"items": categories}
+    return {"items": [category_to_dict(c) for c in categories]}
 
 
 @router.get("/{slug}")
@@ -22,4 +34,4 @@ async def get_category(slug: str, db: AsyncSession = Depends(get_db)):
     category = await service.get_category_by_slug(slug)
     if not category:
         raise HTTPException(status_code=404, detail="Category not found")
-    return category
+    return category_to_dict(category)

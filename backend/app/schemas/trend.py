@@ -1,38 +1,30 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from datetime import datetime
 from uuid import UUID
 from typing import Optional
 
 
-class TrendBase(BaseModel):
-    name: str = Field(..., max_length=500)
-    description: Optional[str] = None
-    category_id: Optional[UUID] = None
-    tags: Optional[list[str]] = None
-
-
-class TrendCreate(TrendBase):
-    pass
-
-
 class TrendResponse(BaseModel):
     id: UUID
-    name: str
-    slug: str
+    topic: str
+    topic_slug: str
     description: Optional[str] = None
+    summary: Optional[str] = None
     category_id: Optional[UUID] = None
-    status: str
-    composite_score: float
-    velocity: float
-    acceleration: float
-    signal_count: int
-    source_diversity: int
-    first_detected_at: Optional[datetime] = None
-    peak_score: Optional[float] = None
-    peak_at: Optional[datetime] = None
-    tags: Optional[list[str]] = None
-    created_at: datetime
-    updated_at: datetime
+    status: str = "active"
+    trend_score: float = 0
+    velocity_24h: float = 0
+    acceleration: float = 0
+    signal_count_24h: int = 0
+    source_count: int = 0
+    active_sources: list[str] = []
+    tags: list[str] = []
+    first_seen_at: Optional[datetime] = None
+    is_viral: bool = False
+    is_breaking: bool = False
+    view_count: int = 0
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
     model_config = {"from_attributes": True}
 
@@ -40,5 +32,5 @@ class TrendResponse(BaseModel):
 class TrendListResponse(BaseModel):
     items: list[TrendResponse]
     total: int
-    skip: int
-    limit: int
+    offset: int = 0
+    limit: int = 50
