@@ -56,6 +56,54 @@ async def debug_db():
         return {"status": "error", "error": str(e), "trace": traceback.format_exc()}
 
 
+@app.get("/debug/collect-full")
+async def debug_collect_full():
+    """Test the full pipeline step by step."""
+    steps = {}
+    try:
+        # Step 1: Fetch signals
+        from app.core.signals.adapters.hackernews import HackerNewsAdapter
+        adapter = HackerNewsAdapter()
+        signals = await adapter.fetch_signals()
+        steps["1_fetch"] = f"ok: {len(signals)} signals"
+
+        # Step 2: Deduplicate
+        from app.core.signals.deduplicator import SignalDeduplicator
+        dedup = SignalDeduplicator()
+        topic_groups = dedup.deduplicate({"hackernews": signals})
+        steps["2_dedup"] = f"ok: {len(topic_groups)} topics"
+
+        # Step 3: DB query (categories)
+        from sqlalchemy.ext.asyncio import AsyncSession
+        from sqlalchemy import select
+        from app.database import _create_engine
+        from sqlalchemy.ext.asyncio import async_sessionmaker
+        from app.models.category import Category
+
+        engine = _create_engine()
+        sm = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+        async with sm() as session:
+            cat_result = await session.execute(select(Category).where(Category.is_active == True))
+            categories = {c.slug: c.id for c in cat_result.scalars().all()}
+            steps["3_db_categories"] = f"ok: {len(categories)} categories"
+
+            # Step 4: Create a trend
+            from app.core.signals.normalizer import TopicNormalizer
+            normalizer = TopicNormalizer()
+            first_topic = list(topic_groups.keys())[0] if topic_groups else None
+            if first_topic:
+                slug = normalizer.create_slug(first_topic)
+                steps["4_normalize"] = f"ok: '{first_topic}' -> '{slug}'"
+            else:
+                steps["4_normalize"] = "skip: no topics"
+
+            await engine.dispose()
+        return {"status": "ok", "steps": steps}
+    except Exception as e:
+        steps["error"] = str(e)
+        return {"status": "error", "steps": steps, "trace": traceback.format_exc()}
+
+
 @app.get("/debug/collect-fetch")
 async def debug_collect_fetch():
     """Test just the signal fetching (no DB)."""
