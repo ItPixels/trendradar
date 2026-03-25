@@ -1,7 +1,7 @@
 import os
 import traceback
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI(title="TrendRadar API", version="0.1.0")
@@ -40,20 +40,31 @@ async def debug_env():
     }
 
 
-@app.post("/debug/sql")
-async def debug_sql(q: str = Query(...)):
-    """Run a SQL query (admin use only - remove in production)."""
+@app.get("/debug/migrate")
+async def debug_migrate():
+    """Run pending schema migrations."""
     try:
         import asyncpg
         db_url = os.environ.get("DATABASE_URL", "")
         raw_url = db_url.replace("postgresql+asyncpg://", "postgresql://")
         conn = await asyncpg.connect(raw_url, statement_cache_size=0)
         await conn.execute("DEALLOCATE ALL")
-        result = await conn.execute(q)
+
+        results = []
+        migrations = [
+            "ALTER TABLE signal_events ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()",
+        ]
+        for sql in migrations:
+            try:
+                await conn.execute(sql)
+                results.append({"sql": sql[:80], "status": "ok"})
+            except Exception as e:
+                results.append({"sql": sql[:80], "status": "error", "error": str(e)})
+
         await conn.close()
-        return {"status": "ok", "result": result}
+        return {"status": "ok", "migrations": results}
     except Exception as e:
-        return {"status": "error", "error": str(e)}
+        return {"status": "error", "error": str(e), "trace": traceback.format_exc()}
 
 
 @app.get("/debug/db")
