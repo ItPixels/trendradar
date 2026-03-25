@@ -56,6 +56,22 @@ async def debug_db():
         return {"status": "error", "error": str(e), "trace": traceback.format_exc()}
 
 
+@app.get("/debug/collect-fetch")
+async def debug_collect_fetch():
+    """Test just the signal fetching (no DB)."""
+    try:
+        from app.core.signals.adapters.hackernews import HackerNewsAdapter
+        adapter = HackerNewsAdapter()
+        signals = await adapter.fetch_signals()
+        return {
+            "status": "ok",
+            "count": len(signals),
+            "sample": [{"title": s.title, "source": s.source} for s in signals[:3]],
+        }
+    except Exception as e:
+        return {"status": "error", "error": str(e), "trace": traceback.format_exc()}
+
+
 @app.post("/debug/collect-test")
 async def debug_collect_test():
     """Test the collect pipeline DB operations without HTTP collection."""
