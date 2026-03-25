@@ -1,13 +1,41 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { PageHeader } from "@/components/layout/page-header";
 import { Search as SearchIcon } from "lucide-react";
 import { TrendFeed } from "@/components/trends/trend-feed";
 import { EmptyState } from "@/components/common/empty-state";
+import { searchTrends } from "@/lib/api/trends";
+import type { Trend } from "@/lib/types/trend";
 
 export default function SearchPage() {
   const [query, setQuery] = useState("");
+  const [results, setResults] = useState<Trend[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [searched, setSearched] = useState(false);
+
+  const doSearch = useCallback(async (q: string) => {
+    if (q.length < 2) {
+      setResults([]);
+      setSearched(false);
+      return;
+    }
+    setLoading(true);
+    setSearched(true);
+    try {
+      const data = await searchTrends(q);
+      setResults(data.items || []);
+    } catch {
+      setResults([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    const timer = setTimeout(() => doSearch(query), 300);
+    return () => clearTimeout(timer);
+  }, [query, doSearch]);
 
   return (
     <div>
@@ -25,7 +53,7 @@ export default function SearchPage() {
         />
       </div>
 
-      {!query && (
+      {!query && !searched && (
         <EmptyState
           icon={SearchIcon}
           title="Search for trends"
@@ -33,7 +61,17 @@ export default function SearchPage() {
         />
       )}
 
-      {/* TODO: Show search results from API */}
+      {searched && !loading && results.length === 0 && (
+        <EmptyState
+          icon={SearchIcon}
+          title="No results found"
+          description={`No trends matching "${query}". Try a different keyword.`}
+        />
+      )}
+
+      {(loading || results.length > 0) && (
+        <TrendFeed trends={results} loading={loading} />
+      )}
     </div>
   );
 }

@@ -14,5 +14,11 @@
       "dest": "api/index.py"
     }
   ],
-  "installCommand": "pip install -r requirements.txt"
+  "installCommand": "pip install -r requirements.txt",
+  "crons": [
+    {
+      "path": "/api/v1/cron/collect",
+      "schedule": "*/30 * * * *"
+    }
+  ]
 }
