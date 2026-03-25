@@ -1,5 +1,5 @@
 import os
-import asyncpg
+import uuid
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.pool import NullPool
@@ -14,29 +14,29 @@ def _get_db_url() -> str:
     return url
 
 
-def _get_raw_url() -> str:
-    """Convert SQLAlchemy URL to raw postgresql:// for asyncpg."""
-    return _get_db_url().replace("postgresql+asyncpg://", "postgresql://")
-
-
 def _create_engine():
-    """Create engine with asyncpg connection creator that disables prepared statement cache.
+    """Create engine compatible with Supabase pgbouncer transaction-mode pooler.
 
-    The key fix: use async_creator to create asyncpg connections with
-    statement_cache_size=0, which is required for Supabase's pgbouncer
-    transaction-mode pooler (port 6543). SQLAlchemy's connect_args
-    don't reliably pass this setting through to asyncpg.
+    Key settings for pgbouncer compatibility:
+    - NullPool: no connection pooling on our side (pgbouncer handles it)
+    - statement_cache_size=0: disable asyncpg's internal prepared statement cache
+    - prepared_statement_cache_size=0: disable SQLAlchemy's prepared statement cache
+    - prepared_statement_name_func: unique names per invocation to avoid
+      "prepared statement already exists" collisions across pgbouncer connections
     """
-    raw_url = _get_raw_url()
-
-    async def creator():
-        return await asyncpg.connect(raw_url, statement_cache_size=0)
+    # Generate a unique prefix for this engine instance to avoid
+    # prepared statement name collisions across Vercel warm starts
+    prefix = uuid.uuid4().hex[:8]
 
     engine = create_async_engine(
         _get_db_url(),
         echo=False,
         poolclass=NullPool,
-        async_creator=creator,
+        connect_args={
+            "statement_cache_size": 0,
+            "prepared_statement_cache_size": 0,
+            "prepared_statement_name_func": lambda: f"_ps_{prefix}_{uuid.uuid4().hex[:8]}",
+        },
     )
     return engine
 
